@@ -1,0 +1,37 @@
+# Build outputs
+*.obj
+*.pch
+*.pdb
+*.ilk
+*.exp
+*.map
+*.idb
+*.ipdb
+*.iobj
+*.tlog
+*.log
+*.lastbuildstate
+*.unsuccessfulbuild
+*.FileListAbsolute.txt
+*.dll.recipe
+
+# Visual Studio intermediate / output directories
+vs/ARM64/
+vs/dll/
+vs/lib/
+
+# Visual Studio user & cache files
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+.vs/
+*.VC.db
+*.VC.opendb
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download original SDK
+      uses: actions/download-artifact@v4
+      with:
+        name: original-sdk
+        path: sdk
+
+    - name: Download ARM binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: arm-binaries
+        path: arm
+
+    - name: Download ARM64 binaries
+      uses: actions/download-artifact@v4
+      with:
+        name: arm64-binaries
+        path: arm64
+
+    - name: Assemble release package
+      run: |
+        # Start from the original SDK as-is
+        cp -r sdk package
+
+        # Add ARM binaries (build outputs are under vs/ in the artifact)
+        cp arm/vs/dll/EverythingARM.dll package/dll/
+        cp arm/vs/lib/EverythingARM.lib package/lib/
+        cp arm/src/EverythingARM.def package/src/
+
+        # Add ARM64 binaries
+        cp arm64/vs/dll/EverythingARM64.dll package/dll/
+        cp arm64/vs/lib/EverythingARM64.lib package/lib/
+        cp arm64/src/EverythingARM64.def package/src/
+
+        echo "=== Release package contents ==="
+        find package -type f | sort
+
+    - name: Zip release archive
+      run: |
+        cd package
+        zip -r ../Everything-SDK-ARM-${{ github.ref_name }}.zip .
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        name: Everything SDK (ARM) ${{ github.ref_name }}
+        body: |
+          Everything SDK with ARM and ARM64 binaries added.
+
+          This package contains the original [Everything SDK](https://www.voidtools.com/Everything-SDK.zip) plus:
+          - `dll/EverythingARM.dll`
+          - `lib/EverythingARM.lib`
+          - `src/EverythingARM.def`
+          - `dll/EverythingARM64.dll`
+          - `lib/EverythingARM64.lib`
+          - `src/EverythingARM64.def`
+        files: Everything-SDK-ARM-${{ github.ref_name }}.zip

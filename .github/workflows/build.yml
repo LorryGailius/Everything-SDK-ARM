@@ -1,0 +1,141 @@
+name: Build ARM & ARM64
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download Everything SDK
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri 'https://www.voidtools.com/Everything-SDK.zip' -OutFile Everything-SDK.zip
+        Expand-Archive -Path Everything-SDK.zip -DestinationPath sdk
+        Write-Host "SDK contents:"
+        Get-ChildItem sdk -Recurse -Directory | ForEach-Object { Write-Host "  $($_.FullName)" }
+
+    - name: Prepare source tree
+      shell: pwsh
+      run: |
+        # The vcxproj references ../src/ and ../include/ relative to vs/
+        # Copy SDK source files into existing dirs (src/ already has .def files)
+        Copy-Item -Force sdk/src/*     src/
+        Copy-Item -Recurse -Force sdk/include include
+        Copy-Item -Recurse -Force sdk/ipc   ipc
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Install ARM cross-compilation tools
+      shell: pwsh
+      run: |
+        $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vs_installer.exe'
+        $vsWhere   = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+        $installPath = & $vsWhere -latest -property installationPath
+
+        $exitCode = (Start-Process -FilePath $installer -ArgumentList @(
+          'modify',
+          '--installPath', "`"$installPath`"",
+          '--add', 'Microsoft.VisualStudio.Component.VC.Tools.ARM',
+          '--add', 'Microsoft.VisualStudio.Component.VC.Tools.ARM64',
+          '--quiet', '--norestart', '--wait'
+        ) -Wait -PassThru).ExitCode
+
+        if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+          Write-Warning "vs_installer exited with code $exitCode"
+        }
+
+    - name: Install older Windows SDK for ARM32 desktop libs
+      shell: pwsh
+      run: |
+        Write-Host "Downloading Windows SDK 10.0.22621.5040 installer..."
+        Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/?linkid=2311806' -OutFile winsdksetup.exe
+
+        Write-Host "Installing ARM desktop libs..."
+        $exitCode = (Start-Process -FilePath .\winsdksetup.exe -ArgumentList @(
+          '/features', 'OptionId.DesktopCPParm',
+          '/q', '/norestart', '/ceip', 'off'
+        ) -Wait -PassThru).ExitCode
+
+        if ($exitCode -ne 0 -and $exitCode -ne 3010) {
+          Write-Warning "winsdksetup exited with code $exitCode"
+        }
+
+        # Verify ARM32 libs were installed
+        $armLibPath = 'C:\Program Files (x86)\Windows Kits\10\Lib\10.0.22621.0\um\arm'
+        if (Test-Path $armLibPath) {
+          Write-Host "ARM32 import libs installed at: $armLibPath"
+        } else {
+          Write-Error "ARM32 import libs not found at: $armLibPath"
+          exit 1
+        }
+
+    - name: Build ARM Release DLL
+      working-directory: vs
+      shell: cmd
+      run: >
+        msbuild sdk.dll.vcxproj
+        /p:Configuration="Release DLL"
+        /p:Platform=ARM
+        /p:WindowsTargetPlatformVersion=10.0.22621.0
+        /m /nologo /v:minimal
+
+    - name: Build ARM Release LIB
+      working-directory: vs
+      shell: cmd
+      run: >
+        msbuild sdk.dll.vcxproj
+        /p:Configuration="Release LIB"
+        /p:Platform=ARM
+        /p:WindowsTargetPlatformVersion=10.0.22621.0
+        /m /nologo /v:minimal
+
+    - name: Build ARM64 Release DLL
+      working-directory: vs
+      shell: cmd
+      run: >
+        msbuild sdk.dll.vcxproj
+        /p:Configuration="Release DLL"
+        /p:Platform=ARM64
+        /m /nologo /v:minimal
+
+    - name: Build ARM64 Release LIB
+      working-directory: vs
+      shell: cmd
+      run: >
+        msbuild sdk.dll.vcxproj
+        /p:Configuration="Release LIB"
+        /p:Platform=ARM64
+        /m /nologo /v:minimal
+
+    - name: Upload ARM binaries
+      uses: actions/upload-artifact@v4
+      with:
+        name: arm-binaries
+        path: |
+          vs/dll/EverythingARM.dll
+          vs/lib/EverythingARM.lib
+          src/EverythingARM.def
+
+    - name: Upload ARM64 binaries
+      uses: actions/upload-artifact@v4
+      with:
+        name: arm64-binaries
+        path: |
+          vs/dll/EverythingARM64.dll
+          vs/lib/EverythingARM64.lib
+          src/EverythingARM64.def
+
+    - name: Upload original SDK
+      uses: actions/upload-artifact@v4
+      with:
+        name: original-sdk
+        path: sdk/
